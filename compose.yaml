@@ -1,0 +1,173 @@
+name: langfuse
+
+x-langfuse-env: &langfuse-env
+  NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+  DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/postgres
+  SALT: ${SALT:?Set SALT}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY}
+  TELEMETRY_ENABLED: "false"
+
+  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${REDIS_AUTH:?Set REDIS_AUTH}
+
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+
+  # Batch Export: download traces/observations as CSV or JSON
+  LANGFUSE_S3_BATCH_EXPORT_ENABLED: "true"
+  LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
+  LANGFUSE_S3_BATCH_EXPORT_PREFIX: exports/
+  LANGFUSE_S3_BATCH_EXPORT_REGION: auto
+  LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: http://localhost:9090
+  LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+  LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+  LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  langfuse-web:
+    container_name: langfuse-web
+    image: docker.langfuse.com/langfuse/langfuse:4
+    restart: "no"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: &infra-depends-on
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
+    logging: *logging
+
+  langfuse-worker:
+    container_name: langfuse-worker
+    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    restart: "no"
+    depends_on: *infra-depends-on
+    environment:
+      <<: *langfuse-env
+    logging: *logging
+
+  postgres:
+    container_name: langfuse-postgres
+    image: postgres:17
+    restart: "no"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  clickhouse:
+    container_name: langfuse-clickhouse
+    image: clickhouse/clickhouse-server:25.12
+    restart: "no"
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    logging: *logging
+
+  redis:
+    container_name: langfuse-redis
+    image: redis:7
+    restart: "no"
+    environment:
+      REDISCLI_AUTH: ${REDIS_AUTH:?Set REDIS_AUTH}
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_AUTH:?Set REDIS_AUTH}
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    logging: *logging
+
+  minio:
+    container_name: langfuse-minio
+    image: cgr.dev/chainguard/minio
+    restart: "no"
+    entrypoint: sh
+    command: >-
+      -c 'mkdir -p /data/langfuse &&
+      minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9090:9000"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    logging: *logging
+
+volumes:
+  postgres_data:
+  clickhouse_data:
+  clickhouse_logs:
+  redis_data:
+  minio_data:

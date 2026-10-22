@@ -1,0 +1,9 @@
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+
+# Local backups
+*.bak
+*.tar.gz
+
