@@ -7,3 +7,6 @@
 *.bak
 *.tar.gz
 
+# Serena local project settings and memories
+.serena/
+

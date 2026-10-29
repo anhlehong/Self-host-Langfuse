@@ -53,7 +53,7 @@ x-logging: &logging
 services:
   langfuse-web:
     container_name: langfuse-web
-    image: docker.langfuse.com/langfuse/langfuse:4
+    image: docker.langfuse.com/langfuse/langfuse:4.71.0@sha256:480b07885c0dc2ad8f542826d66986050ce58c630a1a7830eea15c373ffce5bd
     restart: "no"
     ports:
       - "127.0.0.1:3000:3000"
@@ -69,13 +69,14 @@ services:
     environment:
       <<: *langfuse-env
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
       LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9090
       LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
     logging: *logging
 
   langfuse-worker:
     container_name: langfuse-worker
-    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    image: docker.langfuse.com/langfuse/langfuse-worker:4.71.0@sha256:68c9020b8352d49ad80d768981b21bd465edfcb7de602e76d9b13949bfa85e0e
     restart: "no"
     depends_on: *infra-depends-on
     environment:
@@ -84,7 +85,7 @@ services:
 
   postgres:
     container_name: langfuse-postgres
-    image: postgres:17
+    image: postgres:17.11@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
     restart: "no"
     environment:
       POSTGRES_USER: postgres
@@ -103,7 +104,7 @@ services:
 
   clickhouse:
     container_name: langfuse-clickhouse
-    image: clickhouse/clickhouse-server:25.12
+    image: clickhouse/clickhouse-server:25.12.11.4@sha256:8a790dd3468db22b1d4e7b18a176f378ff5ff6053b9c48dd4ea1fa71a24c5ba6
     restart: "no"
     user: "101:101"
     environment:
@@ -123,7 +124,7 @@ services:
 
   redis:
     container_name: langfuse-redis
-    image: redis:7
+    image: redis:7.4.12@sha256:de248056965d51eaccc002214e9ebd9becfc8ca4e1fc76f89286882475b7eca7
     restart: "no"
     environment:
       REDISCLI_AUTH: ${REDIS_AUTH:?Set REDIS_AUTH}
@@ -144,7 +145,8 @@ services:
 
   minio:
     container_name: langfuse-minio
-    image: cgr.dev/chainguard/minio
+    # MinIO RELEASE.2026-10-23T20-06-51Z
+    image: cgr.dev/chainguard/minio@sha256:e70b2b1e74d79457f808710483bd726ff364529ca30736eaa15a6ab547d3a5a7
     restart: "no"
     entrypoint: sh
     command: >-
